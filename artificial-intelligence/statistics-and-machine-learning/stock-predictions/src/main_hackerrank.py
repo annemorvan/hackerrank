@@ -45,26 +45,28 @@ def updateHistoricalPrices(stock_name,
         # Take all data points
         # Store the last day of data because we don't want to have duplicates
         historical_prices_last_day[stock_name] = d
-        historical_prices_days[stock_name] = [d - i for i in range(length)]
+        historical_prices_days[stock_name] = [-length + 1 + i for i in range(length)]
         historical_prices[stock_name] = five_prices
     else:
         # Update existing data points
-        last_day = historical_prices_last_day[stock_name]
-        diff_days = last_day - d
+        last_num_days = historical_prices_last_day[stock_name]
+        diff_days = last_num_days - d
+        previous_day = historical_prices_days[stock_name][-1]
         if diff_days < length:
             # Take only the new consecutive data points
             historical_prices[stock_name].extend(five_prices[-diff_days:])
             historical_prices_last_day[stock_name] = d
-            historical_prices_days[stock_name].extend([d - i for i in range(diff_days)])
+            historical_prices_days[stock_name].extend([previous_day + 1 + i for i in range(diff_days)])
         else:
             # Take all the new data points but acknowledge the empty previous data points
             historical_prices[stock_name].extend(five_prices)
             historical_prices_last_day[stock_name] = d
-            historical_prices_days[stock_name] = [d - i for i in range(length)]
+            historical_prices_days[stock_name] = [previous_day + 1 + i for i in range(length)]
 
-    print("historical_prices", historical_prices)
-    print("historical_prices_last_day", historical_prices_last_day)
-    print("historical_prices_days", historical_prices_days)
+    # print("remaining days", d)
+    # print("historical_prices", historical_prices)
+    # print("historical_prices_last_day", historical_prices_last_day)
+    # print("historical_prices_days", historical_prices_days)
     return historical_prices, historical_prices_last_day, historical_prices_days
 
 
@@ -100,7 +102,7 @@ def predictNextPrice(x, y, option):
     return prediction
 
 
-def computeTransactions(m, k, d, name, owned, prices, option, historical_prices):
+def computeTransactions(m, k, d, name, owned, prices, option, historical_prices_days, historical_prices):
     """
     In this basic strategy, independent decisions are made daily based only on the information of the current day: i.e. purely on the last 5-day price.
     Each day:
@@ -109,9 +111,9 @@ def computeTransactions(m, k, d, name, owned, prices, option, historical_prices)
     * We compute the slopes from the 5 prices which are stored and sorted in ascending order (from most negative to most positive slope).
 
     Note: d is not used.
-    :param option: can be 'average', 'poly1d'
+    :param option: can be 'average', 'poly1d', 'all_average', 'all_poly1d'
     :return: the transactions to make
-    :rtype: dictionnary with key a string corresponding to a stock name
+    :rtype: dictionary with key a string corresponding to a stock name
     and as item an integer. If positive, it is a 'BUY', if negative it is a 'SELL'. Don't report if nothing
     """
 
@@ -120,10 +122,18 @@ def computeTransactions(m, k, d, name, owned, prices, option, historical_prices)
     slopes = []  # List of slopes for each of the k stocks
 
     # For each stock of that day, compute the slopes
-    for i in range(k):
-        x = range(5)
-        # Extract passed 5-day prices
-        y = prices[i]
+    for stock_index in range(k):
+
+        if option.startswith("all_"):
+            # print("stock name", name[stock_index])
+            # print("historical_prices_days", historical_prices_days)
+            x = historical_prices_days[name[stock_index]]
+            y = historical_prices[name[stock_index]]
+        else:
+            # Computation with only the 5-day prices
+            x = range(5)
+            # Extract passed 5-day prices
+            y = prices[stock_index]
 
         prediction = predictNextPrice(x, y, option)
 
@@ -158,7 +168,7 @@ def computeTransactions(m, k, d, name, owned, prices, option, historical_prices)
     return transactions
 
 
-def printTransactions(m, k, d, name, owned, prices, option, historical_prices):
+def printTransactions(m, k, d, name, owned, prices, option, historical_prices_days, historical_prices):
     """
     Print transactions.
 
@@ -172,7 +182,7 @@ def printTransactions(m, k, d, name, owned, prices, option, historical_prices):
     For index i, the name of the stock is name[i], the number of shares of it you hold is owned[i] and the data about it is prices[i].
     """
     #
-    transactions = computeTransactions(m, k, d, name, owned, prices, option, historical_prices)
+    transactions = computeTransactions(m, k, d, name, owned, prices, option, historical_prices_days, historical_prices)
 
     if transactions:
         # Print the number of transactions
@@ -199,7 +209,7 @@ if __name__ == '__main__':
 
     historical_prices, historical_prices_last_day, historical_prices_days = loadPickleIfAny()  # For advanced version using more than 5 past points
 
-    option = 'average'  # 'poly1d'
+    option = 'all_average'  # 'poly1d'
 
     # Start by reading the input
     # In Python 3, input() takes the user input and put it in string format.
@@ -227,6 +237,6 @@ if __name__ == '__main__':
                                                         historical_prices_last_day,
                                                         historical_prices_days)
 
-    printTransactions(m, k, d, name, owned, prices, option, historical_prices)
+    printTransactions(m, k, d, name, owned, prices, option, historical_prices_days, historical_prices)
 
     savePickles(historical_prices, historical_prices_last_day, historical_prices_days)

@@ -64,10 +64,10 @@ def updateHistoricalPrices(stock_name,
             historical_prices_last_day[stock_name] = d
             historical_prices_days[stock_name] = [previous_day + 1 + i for i in range(length)]
 
-    print("remaining days", d)
-    print("historical_prices", historical_prices)
-    print("historical_prices_last_day", historical_prices_last_day)
-    print("historical_prices_days", historical_prices_days)
+    # print("remaining days", d)
+    # print("historical_prices", historical_prices)
+    # print("historical_prices_last_day", historical_prices_last_day)
+    # print("historical_prices_days", historical_prices_days)
     return historical_prices, historical_prices_last_day, historical_prices_days
 
 
@@ -103,7 +103,40 @@ def predictNextPrice(x, y, option):
     return prediction
 
 
-def computeTransactions(m, k, d, name, owned, prices, option, historical_prices):
+def computeTrueGain(num_days_trading, length, previous_m, transactions, current_d):
+    first_row_done = False
+    temp_true_prices = {}  # dictionary of key: stock name and item: true price
+
+    # Start by reading the NEXT input file to determine the TRUE price of all stocks the day after
+    # We cannot compute for the last day of training
+    if current_d > 1:
+        for line in fileinput.input(files='../data/input' + str(num_days_trading - current_d + 1) + '.txt'):
+
+            if not first_row_done:
+                _ = line.strip().split()
+                first_row_done = True
+            else:
+                row = line.strip().split()
+                stock_name = row[0]
+                five_prices = [float(row[i + 2]) for i in range(length)]
+                temp_true_prices[stock_name] = five_prices
+
+        # Perform transactions
+        for trans in transactions.items():
+
+            stock_name = trans[0]
+            amount = int(trans[1])
+
+            # SELL with the price of today
+            if amount < 0:
+                previous_m -= (amount * temp_true_prices[stock_name][-1])
+            else: # BUY with the price of yesterday
+                previous_m -= (amount * temp_true_prices[stock_name][-2])
+
+    return round(previous_m, 2)
+
+
+def computeTransactions(m, k, d, name, owned, prices, option, historical_prices_days, historical_prices):
     """
     In this basic strategy, independent decisions are made daily based only on the information of the current day: i.e. purely on the last 5-day price.
     Each day:
@@ -112,9 +145,9 @@ def computeTransactions(m, k, d, name, owned, prices, option, historical_prices)
     * We compute the slopes from the 5 prices which are stored and sorted in ascending order (from most negative to most positive slope).
 
     Note: d is not used.
-    :param option: can be 'average', 'poly1d'
+    :param option: can be 'average', 'poly1d', 'all_average', 'all_poly1d'
     :return: the transactions to make
-    :rtype: dictionnary with key a string corresponding to a stock name
+    :rtype: dictionary with key a string corresponding to a stock name
     and as item an integer. If positive, it is a 'BUY', if negative it is a 'SELL'. Don't report if nothing
     """
 
@@ -123,10 +156,18 @@ def computeTransactions(m, k, d, name, owned, prices, option, historical_prices)
     slopes = []  # List of slopes for each of the k stocks
 
     # For each stock of that day, compute the slopes
-    for i in range(k):
-        x = range(5)
-        # Extract passed 5-day prices
-        y = prices[i]
+    for stock_index in range(k):
+
+        if option.startswith("all_"):
+            # print("stock name", name[stock_index])
+            # print("historical_prices_days", historical_prices_days)
+            x = historical_prices_days[name[stock_index]]
+            y = historical_prices[name[stock_index]]
+        else:
+            # Computation with only the 5-day prices
+            x = range(5)
+            # Extract passed 5-day prices
+            y = prices[stock_index]
 
         prediction = predictNextPrice(x, y, option)
 
@@ -161,7 +202,7 @@ def computeTransactions(m, k, d, name, owned, prices, option, historical_prices)
     return transactions
 
 
-def printTransactions(m, k, d, name, owned, prices, option, historical_prices):
+def printTransactions(m, k, d, name, owned, prices, option, historical_prices_days, historical_prices):
     """
     Print transactions.
 
@@ -175,7 +216,7 @@ def printTransactions(m, k, d, name, owned, prices, option, historical_prices):
     For index i, the name of the stock is name[i], the number of shares of it you hold is owned[i] and the data about it is prices[i].
     """
     #
-    transactions = computeTransactions(m, k, d, name, owned, prices, option, historical_prices)
+    transactions = computeTransactions(m, k, d, name, owned, prices, option, historical_prices_days, historical_prices)
 
     if transactions:
         # Print the number of transactions
@@ -193,6 +234,7 @@ def printTransactions(m, k, d, name, owned, prices, option, historical_prices):
             print(to_print)
     else:
         print("0")
+    return transactions
 
 
 if __name__ == '__main__':
@@ -201,12 +243,13 @@ if __name__ == '__main__':
     # exit()
 
     num_days_trading = 20
+    m_true = 0
 
     for day in range(num_days_trading):
 
         historical_prices, historical_prices_last_day, historical_prices_days = loadPickleIfAny()  # For advanced version using more than 5 past points
 
-        option = 'average'  # 'poly1d'
+        option = 'poly1d' #'average'  # 'poly1d'
 
         first_row_done = False
         # Initialization of required arrays
@@ -221,6 +264,9 @@ if __name__ == '__main__':
             if not first_row_done:
                 first_row = line.strip().split()
                 m, k, d = float(first_row[0]), int(first_row[1]), int(first_row[2])
+                if day > 0:
+                    m = m_true
+                    print("m", m)
                 first_row_done = True
             else:
                 row = line.strip().split()
@@ -236,6 +282,13 @@ if __name__ == '__main__':
                                                                 historical_prices_last_day,
                                                                 historical_prices_days)
 
-        printTransactions(m, k, d, name, owned, prices, option, historical_prices)
+        transactions = printTransactions(m, k, d, name, owned, prices, option, historical_prices_days, historical_prices)
         savePickles(historical_prices, historical_prices_last_day, historical_prices_days)
         first_row_done = False
+
+        # Compute true amount of money saved
+        m_true = computeTrueGain(num_days_trading, length, m, transactions, d)
+
+        print("***END OF DAY, true gain: ***", d, m_true)
+
+    erasePickles()
